@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <ctype.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <fuse.h>
 #include <fuse_opt.h>
@@ -362,16 +363,22 @@ void parse_args(int argc, char **argv, struct fuse_args *outargs) {
         fprintf(stderr, "missing source argument\n");
         exit(1);
     } else {
-        config.orig_fs = canonicalize_file_name(config.orig_fs);
-        if(config.orig_fs[strlen(config.orig_fs)-1] == '/')
-            config.orig_fs[strlen(config.orig_fs)-1] = 0;
+        if(chdir(config.orig_fs) == -1) {
+            perror("chdir() on source failed");
+            abort();
+        }
     }
 
     if(config.mount_point == NULL) {
         fprintf(stderr, "missing mount point argument\n");
         exit(1);
     }
-   
+
+    if(chdir(config.orig_fs) == -1) {
+        perror("chdir() on source failed");
+        exit(1);
+    }
+
     if(config.config_file) {
         if(strncmp(config.config_file, config.mount_point, strlen(config.mount_point)) == 0) {
             fprintf(stderr, "configuration file %s must not be located inside the mount point (%s)\n", config.config_file, config.mount_point);
@@ -429,16 +436,20 @@ char *get_caller_cmdline() {
     return ret;
 }
 
+/**
+ * Returns the rewritten path, relative to chdir (which is orig_fs)
+ * If no rewrite is done, just return the given path so a malloc/free cycle can be
+ * avoided. However, there is always a leading garbage "/" in the returned path, it
+ * is the responsibility of the caller to deal with that
+ */
 char *apply_rule(const char *path, struct rewrite_rule *rule) {
     int *ovector, nvec;
     char *rewritten;
     
     if(rule == NULL || rule->rewritten_path == NULL) {
-        rewritten = strcat(strcpy(malloc(strlen(config.orig_fs)+strlen(path)+1), config.orig_fs),
-                      path);
-        DEBUG(2, "  (ignored) %s -> %s\n", path, rewritten);
+        DEBUG(2, "  (ignored) %s\n", path);
         DEBUG(3, "\n");
-        return rewritten;
+        return (char*)path;
     }
     
     /* Fill ovector */
@@ -447,18 +458,16 @@ char *apply_rule(const char *path, struct rewrite_rule *rule) {
     pcre_exec(rule->filename_regexp->regexp, rule->filename_regexp->extra, path+1,
         strlen(path)-1, 0, 0, ovector, nvec);
     
-    /* rewritten = orig_fs + part of path before the matched part + rewritten_path + part of path after the matched path */
-    rewritten = malloc(strlen(config.orig_fs) + strlen(rule->rewritten_path) + 1 /* \0 */ + 
+    /* rewritten = part of path before the matched part + rewritten_path + part of path after the matched path */
+    rewritten = malloc(strlen(rule->rewritten_path) + 1 /* \0 */ + 
         1 + ovector[0] + /* before */
         strlen(path) - ovector[1] /* after */);
-    DEBUG(4, "  orig_fs = %s\n",  config.orig_fs);
     DEBUG(4, "  begin = %s\n", strndup(path, ovector[0] + 1));
     DEBUG(4, "  rewritten = %s\n", rule->rewritten_path);
     DEBUG(4, "  end = %s\n", path + 1 + ovector[1]);
-    strcpy(rewritten, config.orig_fs);
-    strncat(rewritten, path, 1 + ovector[0]);
-    strcat(rewritten, rule->rewritten_path); /* XXX replace \1 ... \n if needed */
-    strcat(rewritten, path + 1 + ovector[1]);
+    strncpy(rewritten, path, 1 + ovector[0]);
+    strcpy(rewritten+1+ovector[0], rule->rewritten_path); /* XXX replace \1 ... \n if needed */
+    strcpy(rewritten+1+ovector[0]+strlen(rule->rewritten_path), path + 1 + ovector[1]);
     
     free(ovector);
     

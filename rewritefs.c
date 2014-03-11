@@ -28,14 +28,17 @@
 
 #include "rewrite.h"
 
+#define PATH(new_path) ((new_path)[1] == 0 ? "." : (new_path) + 1)
+
 static int rewrite_getattr(const char *path, struct stat *stbuf) {
     int res;
     char *new_path = rewrite(path);
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = lstat(new_path, stbuf);
-    free(new_path);
+    res = lstat(PATH(new_path), stbuf);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -61,8 +64,9 @@ static int rewrite_access(const char *path, int mask) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = access(new_path, mask);
-    free(new_path);
+    res = access(PATH(new_path), mask);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -75,8 +79,9 @@ static int rewrite_readlink(const char *path, char *buf, size_t size) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = readlink(new_path, buf, size - 1);
-    free(new_path);
+    res = readlink(PATH(new_path), buf, size - 1);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -101,9 +106,10 @@ static int rewrite_opendir(const char *path, struct fuse_file_info *fi) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    d->dp = opendir(new_path);
+    d->dp = opendir(PATH(new_path));
 
-    free(new_path);
+    if (path != new_path)
+        free(new_path);
 
     if (d->dp == NULL) {
         res = -errno;
@@ -169,8 +175,9 @@ static int rewrite_mknod(const char *path, mode_t mode, dev_t rdev) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = mknod(new_path, mode, rdev);
-    free(new_path);
+    res = mknod(PATH(new_path), mode, rdev);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -183,8 +190,9 @@ static int rewrite_mkdir(const char *path, mode_t mode) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = mkdir(new_path, mode);
-    free(new_path);
+    res = mkdir(PATH(new_path), mode);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -197,10 +205,11 @@ static int rewrite_unlink(const char *path) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = unlink(new_path);
+    res = unlink(PATH(new_path));
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
-    free(new_path);
 
     return 0;
 }
@@ -211,10 +220,11 @@ static int rewrite_rmdir(const char *path) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = rmdir(new_path);
+    res = rmdir(PATH(new_path));
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
-    free(new_path);
 
     return 0;
 }
@@ -225,8 +235,9 @@ static int rewrite_symlink(const char *from, const char *to) {
     if ((new_to = rewrite(to)) == NULL)
         return -ENOMEM;
 
-    res = symlink(from, new_to);
-    free(new_to);
+    res = symlink(from, PATH(new_to));
+    if (new_to != to)
+        free(new_to);
     if (res == -1)
         return -errno;
 
@@ -239,13 +250,16 @@ static int rewrite_rename(const char *from, const char *to) {
     if ((new_from = rewrite(from)) == NULL)
         return -ENOMEM;
     if ((new_to = rewrite(to)) == NULL) {
-        free(new_from);
+        if (from != new_from)
+            free(new_from);
         return -ENOMEM;
     }
 
-    res = rename(new_from, new_to);
-    free(new_from);
-    free(new_to);
+    res = rename(PATH(new_from), PATH(new_to));
+    if (from != new_from)
+        free(new_from);
+    if (to != new_to)
+        free(new_to);
     if (res == -1)
         return -errno;
 
@@ -258,13 +272,16 @@ static int rewrite_link(const char *from, const char *to) {
     if ((new_from = rewrite(from)) == NULL)
         return -ENOMEM;
     if ((new_to = rewrite(to)) == NULL) {
-        free(new_from);
+        if (from != new_from)
+            free(new_from);
         return -ENOMEM;
     }
 
-    res = link(new_from, new_to);
-    free(new_from);
-    free(new_to);
+    res = link(PATH(new_from), PATH(new_to));
+    if (from != new_from)
+        free(new_from);
+    if (to != new_to)
+        free(new_to);
     if (res == -1)
         return -errno;
 
@@ -277,8 +294,9 @@ static int rewrite_chmod(const char *path, mode_t mode) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = chmod(new_path, mode);
-    free(new_path);
+    res = chmod(PATH(new_path), mode);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -291,8 +309,9 @@ static int rewrite_chown(const char *path, uid_t uid, gid_t gid) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = lchown(new_path, uid, gid);
-    free(new_path);
+    res = lchown(PATH(new_path), uid, gid);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -305,8 +324,9 @@ static int rewrite_truncate(const char *path, off_t size) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = truncate(new_path, size);
-    free(new_path);
+    res = truncate(PATH(new_path), size);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -338,8 +358,9 @@ static int rewrite_utimens(const char *path, const struct timespec ts[2]) {
     tv[1].tv_sec = ts[1].tv_sec;
     tv[1].tv_usec = ts[1].tv_nsec / 1000;
 
-    res = utimes(new_path, tv);
-    free(new_path);
+    res = utimes(PATH(new_path), tv);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -352,8 +373,9 @@ static int rewrite_create(const char *path, mode_t mode, struct fuse_file_info *
     if (new_path == NULL)
         return -ENOMEM;
 
-    fd = open(new_path, fi->flags | O_CREAT, mode);
-    free(new_path);
+    fd = open(PATH(new_path), fi->flags | O_CREAT, mode);
+    if (path != new_path)
+        free(new_path);
     if (fd == -1)
         return -errno;
 
@@ -367,8 +389,9 @@ static int rewrite_open(const char *path, struct fuse_file_info *fi) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    fd = open(new_path, fi->flags);
-    free(new_path);
+    fd = open(PATH(new_path), fi->flags);
+    if (path != new_path)
+        free(new_path);
     if (fd == -1)
         return -errno;
 
@@ -406,8 +429,9 @@ static int rewrite_statfs(const char *path, struct statvfs *stbuf) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = statvfs(new_path, stbuf);
-    free(new_path);
+    res = statvfs(PATH(new_path), stbuf);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
 
@@ -459,8 +483,9 @@ static int rewrite_setxattr(const char *path, const char *name, const char *valu
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = lsetxattr(new_path, name, value, size, flags);
-    free(new_path);
+    res = lsetxattr(PATH(new_path), name, value, size, flags);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
     return 0;
@@ -473,8 +498,9 @@ static int rewrite_getxattr(const char *path, const char *name, char *value,
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = lgetxattr(new_path, name, value, size);
-    free(new_path);
+    res = lgetxattr(PATH(new_path), name, value, size);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
     return res;
@@ -486,8 +512,9 @@ static int rewrite_listxattr(const char *path, char *list, size_t size) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = llistxattr(new_path, list, size);
-    free(new_path);
+    res = llistxattr(PATH(new_path), list, size);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
     return res;
@@ -499,8 +526,9 @@ static int rewrite_removexattr(const char *path, const char *name) {
     if (new_path == NULL)
         return -ENOMEM;
 
-    res = lremovexattr(new_path, name);
-    free(new_path);
+    res = lremovexattr(PATH(new_path), name);
+    if (path != new_path)
+        free(new_path);
     if (res == -1)
         return -errno;
     return 0;
